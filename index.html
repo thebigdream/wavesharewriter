@@ -23,7 +23,7 @@
   </div>
 
 <script>
-  // ChromeSamples-style logger
+  // Logger (ChromeSamples style)
   var ChromeSamples = {
     log: function() {
       var line = Array.prototype.slice.call(arguments)
@@ -72,6 +72,36 @@
     return buffer;
   }
 
+  // Write in chunks to avoid NFC IO errors
+  async function writeInChunks(ndef, buffer, chunkSize = 512) {
+    const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * chunkSize;
+      const end = Math.min((i + 1) * chunkSize, buffer.byteLength);
+      const chunk = buffer.slice(start, end);
+
+      try {
+        await ndef.write({
+          records: [{
+            recordType: "mime",
+            mediaType: "application/octet-stream",
+            data: chunk
+          }]
+        });
+        log(`> Chunk ${i + 1}/${totalChunks} sent`);
+      } catch (error) {
+        log(`Argh! Error sending chunk ${i + 1}: ${error}`);
+        throw error;
+      }
+
+      // Short delay to prevent NFC overload
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    log("> All chunks sent!");
+  }
+
   // Scan button
   document.getElementById("scanButton").addEventListener("click", async () => {
     log("User clicked scan button");
@@ -102,15 +132,7 @@
       const checkerboard = generateCheckerboard();
       const ndef = new NDEFReader();
 
-      await ndef.write({
-        records: [{
-          recordType: "mime",
-          mediaType: "application/octet-stream",
-          data: checkerboard.buffer
-        }]
-      });
-
-      log("> Checkerboard sent! Tap your e-paper display.");
+      await writeInChunks(ndef, checkerboard, 512);
     } catch (error) {
       log("Argh! " + error);
     }
