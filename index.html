@@ -1,112 +1,36 @@
-<html lang="en"><head>
-    <meta charset="utf-8">
-    <meta name="description" content="Sample illustrating the use of Web NFC.">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Waveshare Writer</title>
-    <link rel="icon" href="../images/favicon.ico">
-    <link rel="stylesheet" href="../styles/main.css">
-</head>
-<body>
-<button id="scanButton">Scan</button>
-<button id="writeButton">Write</button>
-<button id="makeReadOnlyButton">Make Read-Only</button>
-</body>
-<script>
-  var ChromeSamples = {
-    log: function() {
-      var line = Array.prototype.slice.call(arguments).map(function(argument) {
-        return typeof argument === 'string' ? argument : JSON.stringify(argument);
-      }).join(' ');
-
-      document.querySelector('#log').textContent += line + '\n';
-    },
-
-    clearLog: function() {
-      document.querySelector('#log').textContent = '';
-    },
-
-    setStatus: function(status) {
-      document.querySelector('#status').textContent = status;
-    },
-
-    setContent: function(newContent) {
-      var content = document.querySelector('#content');
-      while(content.hasChildNodes()) {
-        content.removeChild(content.lastChild);
-      }
-      content.appendChild(newContent);
-    }
-  };
-</script>
-
-<h3>Live Output</h3>
-<div id="output" class="output">
-  <div id="content"></div>
-  <div id="status">Web NFC is not available. Use Chrome on Android.</div>
-  <pre id="log"></pre>
-</div>
-
+<button id="writeButton">Write Tiny Checkerboard</button>
+<pre id="log"></pre>
 
 <script>
-  if (/Chrome\/(\d+\.\d+.\d+.\d+)/.test(navigator.userAgent)){
-    // Let's log a warning if the sample is not supposed to execute on this
-    // version of Chrome.
-    if (89 > parseInt(RegExp.$1)) {
-      ChromeSamples.setStatus('Warning! Keep in mind this sample has been tested with Chrome ' + 89 + '.');
-    }
-  }
-</script>
+const log = (msg) => document.querySelector('#log').textContent += msg + '\n';
 
-
-
-<script>
-log = ChromeSamples.log;
-
-if (!("NDEFReader" in window))
-  ChromeSamples.setStatus("Web NFC is not available. Use Chrome on Android.");
-</script>
-
-
-      <script>scanButton.addEventListener("click", async () => {
-  log("User clicked scan button");
-
-  try {
-    const ndef = new NDEFReader();
-    await ndef.scan();
-    log("> Scan started");
-
-    ndef.addEventListener("readingerror", () => {
-      log("Argh! Cannot read data from the NFC tag. Try another one?");
-    });
-
-    ndef.addEventListener("reading", ({ message, serialNumber }) => {
-      log(`> Serial Number: ${serialNumber}`);
-      log(`> Records: (${message.records.length})`);
-    });
-  } catch (error) {
-    log("Argh! " + error);
-  }
-});
-
-writeButton.addEventListener("click", async () => {
+document.getElementById("writeButton").addEventListener("click", async () => {
   log("User clicked write button");
 
+  // Tiny 8x8 checkerboard pattern (1 byte per row, 1=black, 0=white)
+  const tinyCheckerboard = new Uint8Array([
+    0xAA, // 10101010
+    0x55, // 01010101
+    0xAA,
+    0x55,
+    0xAA,
+    0x55,
+    0xAA,
+    0x55
+  ]);
+
   try {
     const ndef = new NDEFReader();
-    await ndef.write("Hello world!");
-    log("> Message written");
-  } catch (error) {
-    log("Argh! " + error);
-  }
-});
-
-makeReadOnlyButton.addEventListener("click", async () => {
-  log("User clicked make read-only button");
-
-  try {
-    const ndef = new NDEFReader();
-    await ndef.makeReadOnly();
-    log("> NFC tag has been made permanently read-only");
+    await ndef.write({
+      records: [
+        {
+          recordType: "mime",
+          mediaType: "application/octet-stream",
+          data: tinyCheckerboard
+        }
+      ]
+    });
+    log("> Tiny checkerboard written (as MIME record)");
   } catch (error) {
     log("Argh! " + error);
   }
