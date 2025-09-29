@@ -2,28 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Waveshare NFC E-Paper Checkerboard</title>
+  <title>Waveshare 7.5-inch NFC E-Paper Checkerboard</title>
 </head>
 <body>
-  <h1>Update E-Paper Display via WebNFC</h1>
+  <h1>Send Checkerboard to E-Paper Display</h1>
   <button id="updateButton">Send Checkerboard</button>
 
   <script>
-    // Simple 8x8 checkerboard (black=1, white=0)
-    // Each byte represents 8 pixels in a row
-    const checkerboard = new Uint8Array([
-      0b10101010, // Row 1
-      0b01010101, // Row 2
-      0b10101010, // Row 3
-      0b01010101, // Row 4
-      0b10101010, // Row 5
-      0b01010101, // Row 6
-      0b10101010, // Row 7
-      0b01010101  // Row 8
-    ]);
+    const WIDTH = 640;
+    const HEIGHT = 384;
+
+    // Generate a full-screen checkerboard pattern
+    function generateCheckerboard() {
+      const bytesPerRow = WIDTH / 8;
+      const buffer = new Uint8Array(bytesPerRow * HEIGHT);
+
+      for (let y = 0; y < HEIGHT; y++) {
+        for (let xByte = 0; xByte < bytesPerRow; xByte++) {
+          let byte = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const x = xByte * 8 + bit;
+            // Checkerboard: black if (x/8 + y/8) is even
+            const isBlack = ((Math.floor(x / 8) + Math.floor(y / 8)) % 2) === 0;
+            if (isBlack) byte |= (1 << (7 - bit)); // MSB first
+          }
+          buffer[y * bytesPerRow + xByte] = byte;
+        }
+      }
+      return buffer;
+    }
 
     async function sendCheckerboard() {
       if ('NDEFWriter' in window) {
+        const checkerboard = generateCheckerboard();
+
         try {
           const writer = new NDEFWriter();
           await writer.write({
