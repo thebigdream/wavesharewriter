@@ -2,17 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="description" content="Waveshare NFC E-Paper Checkerboard Demo">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Waveshare Writer</title>
+  <title>Waveshare NFC E-Paper Writer</title>
 </head>
 <body>
-<h1>Waveshare NFC E-Paper Checkerboard Demo</h1>
-
+<h1>Waveshare NFC E-Paper Writer</h1>
 <button id="scanButton">Scan</button>
 <button id="writeButton">Write Checkerboard</button>
-<button id="makeReadOnlyButton">Make Read-Only</button>
-
 <pre id="log"></pre>
 
 <script>
@@ -20,7 +16,6 @@ const log = (...args) => {
   document.getElementById('log').textContent += args.join(' ') + '\n';
 };
 
-// Display size
 const WIDTH = 640;
 const HEIGHT = 384;
 
@@ -34,8 +29,7 @@ function generateCheckerboard() {
       let byte = 0;
       for (let bit = 0; bit < 8; bit++) {
         const x = xByte * 8 + bit;
-        const isBlack = ((Math.floor(x / 8) + Math.floor(y / 8)) % 2) === 0;
-        if (isBlack) byte |= (1 << (7 - bit));
+        if (((Math.floor(x/8) + Math.floor(y/8)) % 2) === 0) byte |= (1 << (7-bit));
       }
       buffer[y * bytesPerRow + xByte] = byte;
     }
@@ -43,12 +37,12 @@ function generateCheckerboard() {
   return buffer;
 }
 
-// Split into 256-byte blocks and prepend header + metadata
+// Split into 256-byte blocks with full Waveshare-compatible metadata
 function createBlocks(pixelBuffer) {
   const BLOCK_SIZE = 256;
   const HEADER_SIZE = 16;
-  const FILENAME = 'generic_640x384.bin';
   const blocks = [];
+  const filename = 'generic_640x384.bin';
   const totalBlocks = Math.ceil(pixelBuffer.length / (BLOCK_SIZE - HEADER_SIZE));
 
   for (let i = 0; i < totalBlocks; i++) {
@@ -57,32 +51,34 @@ function createBlocks(pixelBuffer) {
     const chunk = pixelBuffer.slice(start, end);
 
     const block = new Uint8Array(BLOCK_SIZE);
-    // Magic header
-    block[0] = 0x57;
-    block[1] = 0x53;
-    block[2] = 0x44;
-    block[3] = 0x5A;
 
-    // Metadata
-    // Filename at offset 0x06
-    for (let j = 0; j < FILENAME.length && (6+j)<HEADER_SIZE; j++) {
-      block[6+j] = FILENAME.charCodeAt(j);
-    }
+    // Header
+    block[0] = 0x57; block[1] = 0x53; block[2] = 0x44; block[3] = 0x5A;
 
-    // Minimal checksum (XOR of pixel bytes)
+    // Version / command bytes (copying dump style)
+    block[4] = 0x31; block[5] = 0x30;
+
+    // Filename in ASCII (6 bytes)
+    for (let j = 0; j < filename.length && j < 6; j++) block[6+j] = filename.charCodeAt(j);
+
+    // Reserved / flags
+    block[12] = 0xFF; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+
+    // Minimal checksum: XOR of pixel bytes
     let checksum = 0;
     for (let b of chunk) checksum ^= b;
     block[0x10] = checksum;
 
-    // Pixel data
+    // Copy pixel data
     block.set(chunk, HEADER_SIZE);
 
     blocks.push(block);
   }
+
   return blocks;
 }
 
-// Write each block sequentially
+// Write blocks via WebNFC sequentially
 async function writeBlocksNFC(blocks) {
   try {
     const ndef = new NDEFReader();
@@ -102,9 +98,9 @@ async function writeBlocksNFC(blocks) {
       await new Promise(r => setTimeout(r, 50));
     }
 
-    log("> All blocks sent!");
-  } catch (error) {
-    log("Argh! " + error);
+    log("> All blocks sent! The display should now refresh.");
+  } catch (err) {
+    log("Argh! " + err);
   }
 }
 
@@ -114,31 +110,17 @@ document.getElementById('scanButton').addEventListener('click', async () => {
     const ndef = new NDEFReader();
     await ndef.scan();
     log("> Scan started");
-
     ndef.addEventListener("readingerror", () => log("Cannot read NFC tag."));
-    ndef.addEventListener("reading", ({ message, serialNumber }) => {
-      log(`> Serial Number: ${serialNumber}`);
-      log(`> Records: ${message.records.length}`);
+    ndef.addEventListener("reading", ({ serialNumber, message }) => {
+      log(`> Serial Number: ${serialNumber}, Records: ${message.records.length}`);
     });
-  } catch (error) {
-    log("Argh! " + error);
-  }
+  } catch (err) { log("Argh! " + err); }
 });
 
 document.getElementById('writeButton').addEventListener('click', async () => {
   const pixels = generateCheckerboard();
   const blocks = createBlocks(pixels);
   await writeBlocksNFC(blocks);
-});
-
-document.getElementById('makeReadOnlyButton').addEventListener('click', async () => {
-  try {
-    const ndef = new NDEFReader();
-    await ndef.makeReadOnly();
-    log("> NFC tag has been made permanently read-only");
-  } catch (error) {
-    log("Argh! " + error);
-  }
 });
 </script>
 </body>
