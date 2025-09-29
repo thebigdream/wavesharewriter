@@ -1,38 +1,49 @@
-<button id="writeButton">Write Tiny Checkerboard</button>
-<pre id="log"></pre>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Waveshare NFC E-Paper Checkerboard</title>
+</head>
+<body>
+  <h1>Update E-Paper Display via WebNFC</h1>
+  <button id="updateButton">Send Checkerboard</button>
 
-<script>
-const log = (msg) => document.querySelector('#log').textContent += msg + '\n';
+  <script>
+    // Simple 8x8 checkerboard (black=1, white=0)
+    // Each byte represents 8 pixels in a row
+    const checkerboard = new Uint8Array([
+      0b10101010, // Row 1
+      0b01010101, // Row 2
+      0b10101010, // Row 3
+      0b01010101, // Row 4
+      0b10101010, // Row 5
+      0b01010101, // Row 6
+      0b10101010, // Row 7
+      0b01010101  // Row 8
+    ]);
 
-document.getElementById("writeButton").addEventListener("click", async () => {
-  log("User clicked write button");
-
-  // Tiny 8x8 checkerboard pattern (1 byte per row, 1=black, 0=white)
-  const tinyCheckerboard = new Uint8Array([
-    0xAA, // 10101010
-    0x55, // 01010101
-    0xAA,
-    0x55,
-    0xAA,
-    0x55,
-    0xAA,
-    0x55
-  ]);
-
-  try {
-    const ndef = new NDEFReader();
-    await ndef.write({
-      records: [
-        {
-          recordType: "mime",
-          mediaType: "application/octet-stream",
-          data: tinyCheckerboard
+    async function sendCheckerboard() {
+      if ('NDEFWriter' in window) {
+        try {
+          const writer = new NDEFWriter();
+          await writer.write({
+            records: [{
+              recordType: "mime",
+              mediaType: "application/octet-stream",
+              data: checkerboard.buffer
+            }]
+          });
+          alert("Checkerboard sent! Tap your e-paper display.");
+        } catch (error) {
+          console.error("Error writing to NFC:", error);
+          alert("Failed to write to NFC: " + error);
         }
-      ]
-    });
-    log("> Tiny checkerboard written (as MIME record)");
-  } catch (error) {
-    log("Argh! " + error);
-  }
-});
-</script>
+      } else {
+        alert("WebNFC is not supported in this browser.");
+      }
+    }
+
+    document.getElementById('updateButton').addEventListener('click', sendCheckerboard);
+  </script>
+</body>
+</html>
