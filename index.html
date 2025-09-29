@@ -2,154 +2,132 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="description" content="Waveshare 7.5-inch NFC E-Paper Checkerboard Demo">
+  <meta name="description" content="Waveshare NFC E-Paper Checkerboard Demo">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Waveshare Writer</title>
-  <link rel="icon" href="../images/favicon.ico">
-  <link rel="stylesheet" href="../styles/main.css">
 </head>
 <body>
-  <h1>Waveshare NFC E-Paper Demo</h1>
+<h1>Waveshare NFC E-Paper Checkerboard Demo</h1>
 
-  <button id="scanButton">Scan</button>
-  <button id="writeButton">Write Checkerboard</button>
-  <button id="makeReadOnlyButton">Make Read-Only</button>
+<button id="scanButton">Scan</button>
+<button id="writeButton">Write Checkerboard</button>
+<button id="makeReadOnlyButton">Make Read-Only</button>
 
-  <h3>Live Output</h3>
-  <div id="output" class="output">
-    <div id="content"></div>
-    <div id="status">Web NFC is not available. Use Chrome on Android.</div>
-    <pre id="log"></pre>
-  </div>
+<pre id="log"></pre>
 
 <script>
-  // Logger (ChromeSamples style)
-  var ChromeSamples = {
-    log: function() {
-      var line = Array.prototype.slice.call(arguments)
-        .map(arg => typeof arg === 'string' ? arg : JSON.stringify(arg))
-        .join(' ');
-      document.querySelector('#log').textContent += line + '\n';
-    },
-    clearLog: function() { document.querySelector('#log').textContent = ''; },
-    setStatus: function(status) { document.querySelector('#status').textContent = status; },
-    setContent: function(newContent) {
-      const content = document.querySelector('#content');
-      while (content.hasChildNodes()) content.removeChild(content.lastChild);
-      content.appendChild(newContent);
-    }
-  };
+const log = (...args) => {
+  document.getElementById('log').textContent += args.join(' ') + '\n';
+};
 
-  const log = ChromeSamples.log;
+// Display size
+const WIDTH = 640;
+const HEIGHT = 384;
 
-  // WebNFC availability check
-  if (!("NDEFReader" in window)) {
-    ChromeSamples.setStatus("Web NFC is not available. Use Chrome on Android.");
-  } else {
-    ChromeSamples.setStatus("Web NFC is available. Ready!");
-  }
+// Generate 1-bit checkerboard
+function generateCheckerboard() {
+  const bytesPerRow = WIDTH / 8;
+  const buffer = new Uint8Array(bytesPerRow * HEIGHT);
 
-  // 7.5-inch display size
-  const WIDTH = 640;
-  const HEIGHT = 384;
-
-  // Generate full-screen checkerboard (1-bit, MSB-first)
-  function generateCheckerboard() {
-    const bytesPerRow = WIDTH / 8;
-    const buffer = new Uint8Array(bytesPerRow * HEIGHT);
-
-    for (let y = 0; y < HEIGHT; y++) {
-      for (let xByte = 0; xByte < bytesPerRow; xByte++) {
-        let byte = 0;
-        for (let bit = 0; bit < 8; bit++) {
-          const x = xByte * 8 + bit;
-          const isBlack = ((Math.floor(x / 8) + Math.floor(y / 8)) % 2) === 0;
-          if (isBlack) byte |= (1 << (7 - bit));
-        }
-        buffer[y * bytesPerRow + xByte] = byte;
+  for (let y = 0; y < HEIGHT; y++) {
+    for (let xByte = 0; xByte < bytesPerRow; xByte++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = xByte * 8 + bit;
+        const isBlack = ((Math.floor(x / 8) + Math.floor(y / 8)) % 2) === 0;
+        if (isBlack) byte |= (1 << (7 - bit));
       }
+      buffer[y * bytesPerRow + xByte] = byte;
     }
-    return buffer;
   }
+  return buffer;
+}
 
-  // Write in chunks to avoid NFC IO errors
-  async function writeInChunks(ndef, buffer, chunkSize = 512) {
-    const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+// Split into 256-byte blocks and prepend header + minimal metadata
+function createBlocks(pixelBuffer) {
+  const BLOCK_SIZE = 256;
+  const blocks = [];
+  const totalBlocks = Math.ceil(pixelBuffer.length / (BLOCK_SIZE - 16)); // 16 bytes header+metadata
 
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * chunkSize;
-      const end = Math.min((i + 1) * chunkSize, buffer.byteLength);
-      const chunk = buffer.slice(start, end);
+  for (let i = 0; i < totalBlocks; i++) {
+    const start = i * (BLOCK_SIZE - 16);
+    const end = Math.min(start + (BLOCK_SIZE - 16), pixelBuffer.length);
+    const chunk = pixelBuffer.slice(start, end);
 
-      try {
-        await ndef.write({
-          records: [{
-            recordType: "mime",
-            mediaType: "application/octet-stream",
-            data: chunk
-          }]
-        });
-        log(`> Chunk ${i + 1}/${totalChunks} sent`);
-      } catch (error) {
-        log(`Argh! Error sending chunk ${i + 1}: ${error}`);
-        throw error;
-      }
+    const block = new Uint8Array(BLOCK_SIZE);
+    // Magic header
+    block[0] = 0x57;
+    block[1] = 0x53;
+    block[2] = 0x44;
+    block[3] = 0x5A;
+    // Minimal metadata (12 bytes)
+    for (let j = 4; j < 16; j++) block[j] = 0x00;
+    // Pixel data
+    block.set(chunk, 16);
 
-      // Short delay to prevent NFC overload
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-
-    log("> All chunks sent!");
+    blocks.push(block);
   }
+  return blocks;
+}
 
-  // Scan button
-  document.getElementById("scanButton").addEventListener("click", async () => {
-    log("User clicked scan button");
+// Write each block sequentially
+async function writeBlocksNFC(blocks) {
+  try {
+    const ndef = new NDEFReader();
+    log("> Waiting for NFC scan...");
+    await ndef.scan();
+    log("> Scan started");
 
-    try {
-      const ndef = new NDEFReader();
-      await ndef.scan();
-      log("> Scan started");
-
-      ndef.addEventListener("readingerror", () => {
-        log("Argh! Cannot read data from the NFC tag. Try another one?");
+    for (let i = 0; i < blocks.length; i++) {
+      await ndef.write({
+        records: [{
+          recordType: "mime",
+          mediaType: "application/octet-stream",
+          data: blocks[i]
+        }]
       });
-
-      ndef.addEventListener("reading", ({ message, serialNumber }) => {
-        log(`> Serial Number: ${serialNumber}`);
-        log(`> Records: (${message.records.length})`);
-      });
-    } catch (error) {
-      log("Argh! " + error);
+      log(`> Block ${i+1}/${blocks.length} sent`);
+      await new Promise(r => setTimeout(r, 50)); // small delay
     }
-  });
 
-  // Write checkerboard button
-  document.getElementById("writeButton").addEventListener("click", async () => {
-    log("User clicked write checkerboard button");
+    log("> All blocks sent!");
+  } catch (error) {
+    log("Argh! " + error);
+  }
+}
 
-    try {
-      const checkerboard = generateCheckerboard();
-      const ndef = new NDEFReader();
+// Button handlers
+document.getElementById('scanButton').addEventListener('click', async () => {
+  try {
+    const ndef = new NDEFReader();
+    await ndef.scan();
+    log("> Scan started");
 
-      await writeInChunks(ndef, checkerboard, 512);
-    } catch (error) {
-      log("Argh! " + error);
-    }
-  });
+    ndef.addEventListener("readingerror", () => log("Cannot read NFC tag."));
+    ndef.addEventListener("reading", ({ message, serialNumber }) => {
+      log(`> Serial Number: ${serialNumber}`);
+      log(`> Records: ${message.records.length}`);
+    });
+  } catch (error) {
+    log("Argh! " + error);
+  }
+});
 
-  // Make read-only button
-  document.getElementById("makeReadOnlyButton").addEventListener("click", async () => {
-    log("User clicked make read-only button");
+document.getElementById('writeButton').addEventListener('click', async () => {
+  const pixels = generateCheckerboard();
+  const blocks = createBlocks(pixels);
+  await writeBlocksNFC(blocks);
+});
 
-    try {
-      const ndef = new NDEFReader();
-      await ndef.makeReadOnly();
-      log("> NFC tag has been made permanently read-only");
-    } catch (error) {
-      log("Argh! " + error);
-    }
-  });
+document.getElementById('makeReadOnlyButton').addEventListener('click', async () => {
+  try {
+    const ndef = new NDEFReader();
+    await ndef.makeReadOnly();
+    log("> NFC tag has been made permanently read-only");
+  } catch (error) {
+    log("Argh! " + error);
+  }
+});
 </script>
 </body>
 </html>
