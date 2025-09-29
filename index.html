@@ -7,9 +7,11 @@
 </head>
 <body>
 <h1>Waveshare NFC E-Paper Writer</h1>
+
 <button id="scanButton">Scan</button>
 <button id="writeButton">Write Checkerboard</button>
 <button id="wipeButton">Wipe Display</button>
+
 <pre id="log"></pre>
 
 <script>
@@ -17,6 +19,7 @@ const log = (...args) => {
   document.getElementById('log').textContent += args.join(' ') + '\n';
 };
 
+// Display size
 const WIDTH = 640;
 const HEIGHT = 384;
 
@@ -44,12 +47,11 @@ function generateBlankImage() {
   return new Uint8Array(bytesPerRow * HEIGHT); // all zeros = white
 }
 
-// Split into 256-byte blocks with Waveshare-compatible header
+// Split pixel data into 256-byte blocks with Waveshare header
 function createBlocks(pixelBuffer) {
   const BLOCK_SIZE = 256;
   const HEADER_SIZE = 16;
   const blocks = [];
-  const filename = 'generic_640x384.bin';
   const totalBlocks = Math.ceil(pixelBuffer.length / (BLOCK_SIZE - HEADER_SIZE));
 
   for (let i = 0; i < totalBlocks; i++) {
@@ -61,16 +63,12 @@ function createBlocks(pixelBuffer) {
 
     // Header
     block[0] = 0x57; block[1] = 0x53; block[2] = 0x44; block[3] = 0x5A;
-    // Version / command bytes
+    // Version / command bytes (generic)
     block[4] = 0x31; block[5] = 0x30;
-    // Filename in ASCII (6 bytes)
-    for (let j = 0; j < filename.length && j < 6; j++) block[6+j] = filename.charCodeAt(j);
-    // Reserved / flags
-    block[12] = 0xFF; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
-    // Minimal checksum
-    let checksum = 0;
-    for (let b of chunk) checksum ^= b;
-    block[0x10] = checksum;
+    // Reserved
+    block[6] = block[7] = block[8] = block[9] = block[10] = block[11] = 0x00;
+    block[12] = block[13] = block[14] = block[15] = 0x00;
+
     // Pixel data
     block.set(chunk, HEADER_SIZE);
 
@@ -80,7 +78,16 @@ function createBlocks(pixelBuffer) {
   return blocks;
 }
 
-// Write blocks via WebNFC sequentially
+// Refresh block to trigger e-paper update
+const REFRESH_BLOCK = new Uint8Array(16);
+REFRESH_BLOCK[0] = 0x57;
+REFRESH_BLOCK[1] = 0x53;
+REFRESH_BLOCK[2] = 0x44;
+REFRESH_BLOCK[3] = 0x5A;
+// Command bytes for refresh
+REFRESH_BLOCK[4] = 0x01;
+REFRESH_BLOCK[5] = 0x00;
+
 async function writeBlocksNFC(blocks) {
   try {
     const ndef = new NDEFReader();
@@ -97,10 +104,19 @@ async function writeBlocksNFC(blocks) {
         }]
       });
       log(`> Block ${i+1}/${blocks.length} sent`);
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 50)); // small delay
     }
 
-    log("> All blocks sent! Display should refresh.");
+    // Send refresh command
+    log("> Sending refresh command...");
+    await ndef.write({
+      records: [{
+        recordType: "mime",
+        mediaType: "application/octet-stream",
+        data: REFRESH_BLOCK
+      }]
+    });
+    log("> Refresh command sent, display should update!");
   } catch (err) {
     log("Argh! " + err);
   }
