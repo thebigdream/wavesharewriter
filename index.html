@@ -43,15 +43,17 @@ function generateCheckerboard() {
   return buffer;
 }
 
-// Split into 256-byte blocks and prepend header + minimal metadata
+// Split into 256-byte blocks and prepend header + metadata
 function createBlocks(pixelBuffer) {
   const BLOCK_SIZE = 256;
+  const HEADER_SIZE = 16;
+  const FILENAME = 'generic_640x384.bin';
   const blocks = [];
-  const totalBlocks = Math.ceil(pixelBuffer.length / (BLOCK_SIZE - 16)); // 16 bytes header+metadata
+  const totalBlocks = Math.ceil(pixelBuffer.length / (BLOCK_SIZE - HEADER_SIZE));
 
   for (let i = 0; i < totalBlocks; i++) {
-    const start = i * (BLOCK_SIZE - 16);
-    const end = Math.min(start + (BLOCK_SIZE - 16), pixelBuffer.length);
+    const start = i * (BLOCK_SIZE - HEADER_SIZE);
+    const end = Math.min(start + (BLOCK_SIZE - HEADER_SIZE), pixelBuffer.length);
     const chunk = pixelBuffer.slice(start, end);
 
     const block = new Uint8Array(BLOCK_SIZE);
@@ -60,10 +62,20 @@ function createBlocks(pixelBuffer) {
     block[1] = 0x53;
     block[2] = 0x44;
     block[3] = 0x5A;
-    // Minimal metadata (12 bytes)
-    for (let j = 4; j < 16; j++) block[j] = 0x00;
+
+    // Metadata
+    // Filename at offset 0x06
+    for (let j = 0; j < FILENAME.length && (6+j)<HEADER_SIZE; j++) {
+      block[6+j] = FILENAME.charCodeAt(j);
+    }
+
+    // Minimal checksum (XOR of pixel bytes)
+    let checksum = 0;
+    for (let b of chunk) checksum ^= b;
+    block[0x10] = checksum;
+
     // Pixel data
-    block.set(chunk, 16);
+    block.set(chunk, HEADER_SIZE);
 
     blocks.push(block);
   }
@@ -87,7 +99,7 @@ async function writeBlocksNFC(blocks) {
         }]
       });
       log(`> Block ${i+1}/${blocks.length} sent`);
-      await new Promise(r => setTimeout(r, 50)); // small delay
+      await new Promise(r => setTimeout(r, 50));
     }
 
     log("> All blocks sent!");
