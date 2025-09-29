@@ -9,6 +9,7 @@
 <h1>Waveshare NFC E-Paper Writer</h1>
 <button id="scanButton">Scan</button>
 <button id="writeButton">Write Checkerboard</button>
+<button id="wipeButton">Wipe Display</button>
 <pre id="log"></pre>
 
 <script>
@@ -37,7 +38,13 @@ function generateCheckerboard() {
   return buffer;
 }
 
-// Split into 256-byte blocks with full Waveshare-compatible metadata
+// Generate blank image (all white)
+function generateBlankImage() {
+  const bytesPerRow = WIDTH / 8;
+  return new Uint8Array(bytesPerRow * HEIGHT); // all zeros = white
+}
+
+// Split into 256-byte blocks with Waveshare-compatible header
 function createBlocks(pixelBuffer) {
   const BLOCK_SIZE = 256;
   const HEADER_SIZE = 16;
@@ -54,22 +61,17 @@ function createBlocks(pixelBuffer) {
 
     // Header
     block[0] = 0x57; block[1] = 0x53; block[2] = 0x44; block[3] = 0x5A;
-
-    // Version / command bytes (copying dump style)
+    // Version / command bytes
     block[4] = 0x31; block[5] = 0x30;
-
     // Filename in ASCII (6 bytes)
     for (let j = 0; j < filename.length && j < 6; j++) block[6+j] = filename.charCodeAt(j);
-
     // Reserved / flags
     block[12] = 0xFF; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
-
-    // Minimal checksum: XOR of pixel bytes
+    // Minimal checksum
     let checksum = 0;
     for (let b of chunk) checksum ^= b;
     block[0x10] = checksum;
-
-    // Copy pixel data
+    // Pixel data
     block.set(chunk, HEADER_SIZE);
 
     blocks.push(block);
@@ -98,7 +100,7 @@ async function writeBlocksNFC(blocks) {
       await new Promise(r => setTimeout(r, 50));
     }
 
-    log("> All blocks sent! The display should now refresh.");
+    log("> All blocks sent! Display should refresh.");
   } catch (err) {
     log("Argh! " + err);
   }
@@ -119,6 +121,12 @@ document.getElementById('scanButton').addEventListener('click', async () => {
 
 document.getElementById('writeButton').addEventListener('click', async () => {
   const pixels = generateCheckerboard();
+  const blocks = createBlocks(pixels);
+  await writeBlocksNFC(blocks);
+});
+
+document.getElementById('wipeButton').addEventListener('click', async () => {
+  const pixels = generateBlankImage();
   const blocks = createBlocks(pixels);
   await writeBlocksNFC(blocks);
 });
